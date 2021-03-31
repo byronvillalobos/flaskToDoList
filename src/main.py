@@ -2,13 +2,14 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 import os
+import json
 from flask import Flask, request, jsonify, url_for
 from flask_migrate import Migrate
 from flask_swagger import swagger
 from flask_cors import CORS
 from utils import APIException, generate_sitemap
 from admin import setup_admin
-from models import db, Todos
+from models import db, User, Todo
 #from models import Person
 
 app = Flask(__name__)
@@ -20,6 +21,11 @@ db.init_app(app)
 CORS(app)
 setup_admin(app)
 
+class BaseObject:
+    def toJSON(self):
+        return json.dumps(self, default=lambda o: o.__dict__, 
+            sort_keys=True, indent=4)
+
 # Handle/serialize errors like a JSON object
 @app.errorhandler(APIException)
 def handle_invalid_usage(error):
@@ -30,54 +36,80 @@ def handle_invalid_usage(error):
 def sitemap():
     return generate_sitemap(app)
 
-@app.route('/todos', methods=['GET'])
-def get_todos():
+@app.route('/user', methods=['GET'])
+def handle_hello():
 
-    # get all the people
-    query = Todos.query.all()
+    response_body = {
+        "msg": "Hello, this is your GET /user response "
+    }
 
-    # map the results and your list of people  inside of the all_people variable
-    all_todos = list(map(lambda x: x.serialize(), query))
+    return jsonify(response_body), 200
 
-    return jsonify(all_todos), 200
+# [GET] - Ruta para obtener todas las TODOS
+@app.route('/todo', methods=['GET'])
+def index():
 
-@app.route('/todos', methods=['POST'])
-def add_todo():
+    results = Todo.query.all()
 
-    request_body = request.get_json()
-    todo = Todos(name=request_body["label"])
-    db.session.add(todo)
-    db.session.commit()
+    # all_todos = list(map(lambda x: x.serialize(), results))
 
-    return jsonify("Todo agregado de forma correcta."), 200
+    return jsonify(list(map(lambda x: x.serialize(), results))), 200
 
-@app.route('/upd_todo/<int:fid>', methods=['PUT'])
-def upd_fav(fid):
-
-    fav = Favorites.query.get(fid)
-    if fav is None:
-        raise APIException('Favorite not found', status_code=404)
+# [POST] - Ruta para crear un TODO
+@app.route('/todo', methods=['POST'])
+def store():
 
     request_body = request.get_json()
+    todo = Todo(done=request_body["done"], label=request_body["label"])
 
-    if "name" in request_body:
-        fav.name = request_body["name"]
+    try: 
+        db.session.add(todo) 
+        db.session.commit()
+        
+        return jsonify(Todo.serialize(todo)), 201
+    
+    except AssertionError as exception_message: 
+        return jsonify(msg='Error: {}. '.format(exception_message)), 400
 
-    db.session.commit()
-    return jsonify("Favorito modificado de forma correcta."), 200
+# [PUT] - Ruta para modificar un TODO
+@app.route('/todo/<int:id>', methods=['PUT'])
+def update(id):
 
-@app.route('/del_todo/<int:fid>', methods=['DELETE'])
-def del_fav(fid):
+    todo = Todo.query.get(id)
 
-    fav = Favorites.query.get(fid)
+    if todo is None:
+        raise APIException('Todo is not found.',status_code=403)
 
-    if fav is None:
-        raise APIException('Favorite not found', status_code=404)
-    db.session.delete(fav)
-    db.session.commit()
+    request_body = request.get_json()
 
-    return jsonify("Favorito eliminado de forma correcta."), 200
+    todo.done = request_body["done"]
+    todo.label = request_body["label"]
 
+    try: 
+        db.session.commit()
+        
+        return jsonify(Todo.serialize(todo)), 200
+    
+    except AssertionError as exception_message: 
+        return jsonify(msg='Error: {}. '.format(exception_message)), 400
+
+# [DELETE] - Ruta para eliminar un TODO
+@app.route('/todo/<int:id>', methods=['DELETE'])
+def delete(id):
+
+    todo = Todo.query.get(id)
+
+    if todo is None:
+        raise APIException('Todo is not found.',status_code=403)
+
+    try:
+        db.session.delete(todo)
+        db.session.commit()
+        
+        return jsonify('Todo was successfully eliminated.'), 200
+    
+    except AssertionError as exception_message: 
+        return jsonify(msg='Error: {}. '.format(exception_message)), 400
 
 # this only runs if `$ python src/main.py` is executed
 if __name__ == '__main__':
